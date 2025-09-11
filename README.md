@@ -54,7 +54,7 @@
 2. Spring Boot 3.2.0 - быстрый старт и автоконфигурация
 3. Spring Data JPA - абстракция для работы с БД
 4. Hibernate 6.3 - ORM с кэшированием и lazy loading
-5. MySQL 8.0 - transactional InnoDB storage
+5. MySQL 8.0 - транзакционное хранилище InnoDB
 6. Jsoup - парсинг HTML и CSS селекторы
 
 <h4>Морфологический анализ:</h4>
