@@ -324,6 +324,7 @@
 GET /api/search
 
     bash
+    
     # Простой запрос
     curl "http://localhost:8080/api/search?query=программирование"
 
