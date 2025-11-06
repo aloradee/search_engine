@@ -300,14 +300,14 @@
     * Название сайта-источника
 
 <h4>API endpoints:</h4>
-1. GET /api/statistics - получение статистики
-2. GET /api/startIndexing - Запускает полную переиндексацию
-    * Возвращает: {"result": true} или ошибку
-    * Ошибка: {"result": false, "error": "Индексация уже запущена"}
-3. GET /api/stopIndexing
-    * Останавливает текущую индексацию
-    * Возвращает: {"result": true} или ошибку
-    * Ошибка: {"result": false, "error": "Индексация не запущена"}
+1. GET /api/statistics - получение статистики<br>
+2. GET /api/startIndexing - Запускает полную переиндексацию<br>
+    * Возвращает: {"result": true} или ошибку<br>
+    * Ошибка: {"result": false, "error": "Индексация уже запущена"}<br>
+3. GET /api/stopIndexing<br>
+    * Останавливает текущую индексацию<br>
+    * Возвращает: {"result": true} или ошибку<br>
+    * Ошибка: {"result": false, "error": "Индексация не запущена"}<br>
 
 4. POST /api/indexPage
 
