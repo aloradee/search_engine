@@ -1,6 +1,7 @@
 package searchengine.services.impl;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +21,13 @@ import searchengine.services.SearchService;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Реализация сервиса поиска.
+ * Выполняет поиск по проиндексированным данным с учетом морфологии.
+ *
+ * @author Кирилл Христич
+ */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SearchServiceImpl implements SearchService {
@@ -29,9 +37,17 @@ public class SearchServiceImpl implements SearchService {
     private final IndexRepository indexRepository;
     private final LemmaService lemmaService;
 
+    private static final float MAX_LEMMA_FREQUENCY_PERCENT = 0.8f;
+
     @Override
     @Transactional(readOnly = true)
     public ResponseEntity<SearchResponse> search(String query, String siteUrl, int offset, int limit) {
+        log.info("Поисковый запрос: '{}', сайт: {}, offset: {}, limit: {}", query, siteUrl, offset, limit);
+
+        if (siteUrl != null) {
+            siteUrl = normalizeUrl(siteUrl);
+        }
+
         if (query == null || query.trim().isEmpty()) {
             return ResponseEntity.badRequest()
                     .body(new SearchResponse(false, "Задан пустой поисковый запрос"));
@@ -39,8 +55,8 @@ public class SearchServiceImpl implements SearchService {
 
         try {
             String cleanQuery = lemmaService.cleanHtml(query);
-            Map<String, Integer> queryLemmasMap = lemmaService.extractLemmas(cleanQuery);
-            List<String> queryLemmas = new ArrayList<>(queryLemmasMap.keySet());
+            Set<String> queryLemmasSet = lemmaService.getQueryLemmas(cleanQuery);
+            List<String> queryLemmas = new ArrayList<>(queryLemmasSet);
 
             if (queryLemmas.isEmpty()) {
                 return ResponseEntity.ok(new SearchResponse(true, 0, Collections.emptyList()));
@@ -51,11 +67,13 @@ public class SearchServiceImpl implements SearchService {
 
             List<Lemma> foundLemmas = siteOpt.isPresent() ?
                     lemmaRepository.findByLemmaInAndSite(queryLemmas, siteOpt.get()) :
-                    lemmaRepository.findLemmasOrderByFrequency(queryLemmas);
+                    getFilteredLemmas(queryLemmas, siteOpt.orElse(null));
 
             if (foundLemmas.isEmpty()) {
                 return ResponseEntity.ok(new SearchResponse(true, 0, Collections.emptyList()));
             }
+
+            foundLemmas.sort(Comparator.comparingInt(Lemma::getFrequency));
 
             List<Page> foundPages = findPagesWithAllLemmas(foundLemmas);
 
@@ -69,21 +87,52 @@ public class SearchServiceImpl implements SearchService {
                     .sorted((p1, p2) -> Float.compare(
                             relevanceMap.getOrDefault(p2, 0f),
                             relevanceMap.getOrDefault(p1, 0f)))
-                    .collect(Collectors.toList());
+                    .toList();
 
             List<SearchItem> searchItems = new ArrayList<>();
-            for (int i = offset; i < Math.min(offset + limit, sortedPages.size()); i++) {
+            int endIndex = Math.min(offset + limit, sortedPages.size());
+
+            for (int i = offset; i < endIndex; i++) {
                 Page page = sortedPages.get(i);
                 SearchItem item = createSearchItem(page, query, relevanceMap.get(page));
                 searchItems.add(item);
             }
 
+            log.info("Найдено {} страниц, возвращается {} результатов", sortedPages.size(), searchItems.size());
             return ResponseEntity.ok(new SearchResponse(true, sortedPages.size(), searchItems));
 
         } catch (Exception e) {
+            log.error("Ошибка при выполнении поиска: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError()
                     .body(new SearchResponse(false, "Ошибка при выполнении поиска: " + e.getMessage()));
         }
+    }
+
+    private List<Lemma> getFilteredLemmas(List<String> queryLemmas, Site site) {
+        List<Lemma> allFoundLemmas;
+
+        if (site != null) {
+            allFoundLemmas = lemmaRepository.findByLemmaInAndSite(queryLemmas, site);
+        } else {
+            allFoundLemmas = new ArrayList<>();
+            for (String lemmaStr : queryLemmas) {
+                allFoundLemmas.addAll(lemmaRepository.findByLemma(lemmaStr));
+            }
+        }
+
+        if (allFoundLemmas.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return allFoundLemmas.stream()
+                .filter(lemma -> {
+                    int totalPagesForSite = pageRepository.countBySite(lemma.getSite());
+                    if (totalPagesForSite == 0) return true;
+                    float frequencyPercent = (float) lemma.getFrequency() / totalPagesForSite;
+                    return frequencyPercent <= MAX_LEMMA_FREQUENCY_PERCENT;
+                })
+                .sorted(Comparator.comparingInt(Lemma::getFrequency))
+                .collect(Collectors.toList());
     }
 
     private List<Page> findPagesWithAllLemmas(List<Lemma> lemmas) {
@@ -93,25 +142,25 @@ public class SearchServiceImpl implements SearchService {
 
         Lemma firstLemma = lemmas.get(0);
         List<Index> firstIndexes = indexRepository.findByLemma(firstLemma);
-        Set<Page> candidatePages = firstIndexes.stream()
-                .map(index -> index.getPage())
+        Set<Integer> candidatePageIds = firstIndexes.stream()
+                .map(index -> index.getPage().getId())
                 .collect(Collectors.toSet());
 
-        for (int i = 1; i < lemmas.size(); i++) {
+        for (int i = 1; i < lemmas.size() && !candidatePageIds.isEmpty(); i++) {
             Lemma lemma = lemmas.get(i);
             List<Index> indexes = indexRepository.findByLemma(lemma);
-            Set<Page> lemmaPages = indexes.stream()
-                    .map(index -> index.getPage())
+            Set<Integer> lemmaPageIds = indexes.stream()
+                    .map(index -> index.getPage().getId())
                     .collect(Collectors.toSet());
 
-            candidatePages.retainAll(lemmaPages);
-
-            if (candidatePages.isEmpty()) {
-                break;
-            }
+            candidatePageIds.retainAll(lemmaPageIds);
         }
 
-        return new ArrayList<>(candidatePages);
+        if (candidatePageIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return pageRepository.findAllById(candidatePageIds);
     }
 
     private Map<Page, Float> calculateRelevance(List<Page> pages, List<Lemma> lemmas) {
@@ -127,9 +176,9 @@ public class SearchServiceImpl implements SearchService {
         }
 
         if (maxRelevance > 0) {
-            for (Page page : relevanceMap.keySet()) {
-                float normalized = relevanceMap.get(page) / maxRelevance;
-                relevanceMap.put(page, normalized);
+            for (Map.Entry<Page, Float> entry : relevanceMap.entrySet()) {
+                float normalized = entry.getValue() / maxRelevance;
+                relevanceMap.put(entry.getKey(), normalized);
             }
         }
 
@@ -149,9 +198,19 @@ public class SearchServiceImpl implements SearchService {
 
     private String extractTitle(String html) {
         try {
-            return org.jsoup.Jsoup.parse(html).title();
+            String title = org.jsoup.Jsoup.parse(html).title();
+            return title != null && !title.isEmpty() ? title : "Без названия";
         } catch (Exception e) {
             return "Без названия";
         }
+    }
+
+    private String normalizeUrl(String url) {
+        if (url == null) return null;
+        url = url.trim();
+        if (!url.endsWith("/")) {
+            url = url + "/";
+        }
+        return url;
     }
 }

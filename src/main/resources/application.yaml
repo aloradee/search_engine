@@ -41,13 +41,10 @@ indexing-settings:
       name: Skillbox
     - url: https://www.playback.ru
       name: PlayBack.Ru
-    - url: https://www.wildberries.ru/
-      name: Wb
 
   user-agent: HeliontSearchBot/1.0
   referrer: https://www.google.com
   delay-between-requests: 1000
-  timeout: 10000
 
 logging:
   level:

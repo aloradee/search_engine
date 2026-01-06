@@ -1,24 +1,31 @@
 package searchengine.model;
 
 import jakarta.persistence.*;
-import jakarta.persistence.Index;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Сущность, представляющая веб-страницу.
+ * Хранит содержимое страницы и связи с сайтом и леммами.
+ *
+ * @author Кирилл Христич
+ */
 @Entity
 @Table(name = "page", indexes = {
-        @Index(name = "path_index", columnList = "path")
+        @jakarta.persistence.Index(name = "path_index", columnList = "path")
 })
 @Getter
 @Setter
 public class Page {
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int id;
 
-    @ManyToOne(fetch = FetchType.EAGER)
-    @JoinColumn(name = "site_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "site_id", nullable = false, foreignKey = @ForeignKey(name = "fk_page_site"))
     private Site site;
 
     @Column(columnDefinition = "VARCHAR(500)", nullable = false)
@@ -30,7 +37,6 @@ public class Page {
     @Column(columnDefinition = "MEDIUMTEXT", nullable = false)
     private String content;
 
-    @Column(columnDefinition = "ENUM('INDEXING', 'INDEXED')")
-    @Enumerated(EnumType.STRING)
-    private SiteStatus status; // Исправлено на IndexStatus
+    @OneToMany(mappedBy = "page", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private List<Index> indexes = new ArrayList<>();
 }
